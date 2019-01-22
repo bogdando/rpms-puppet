@@ -25,8 +25,8 @@
 %global pending_upgrade_file %{pending_upgrade_path}/upgrade_pending
 
 Name:           puppet
-Version:        5.5.1
-Release:        2%{?dist}
+Version:        5.5.6
+Release:        3%{?dist}
 Summary:        A network tool for managing many disparate systems
 License:        ASL 2.0
 URL:            http://puppetlabs.com
@@ -40,9 +40,15 @@ Source4:        start-puppet-wrapper
 Patch01:        0001-Fix-puppet-paths.patch
 Patch02:        0002-Revert-maint-Remove-puppetmaster.service.patch
 Patch03:        0003-Remove-Fedora-release-restrictions-from-DNF-provider.patch
+# Note: Puppet 5.5.7 is broken
+# Backporting patches that add supports for RHEL > 7
+# https://github.com/puppetlabs/puppet/pull/7000 (PUP-9069)
+Patch04:        0004-PUP-9069-Add-support-for-RHEL8.patch
+# https://github.com/puppetlabs/puppet/pull/7140 (PUP-9198)
+Patch05:        0005-PUP-9198-Add-RHEL8-support-in-the-dnf-provider.patch
 Group:          System Environment/Base
 
-
+BuildRequires:  git
 BuildRequires:  ruby-devel >= 1.8.7
 # ruby-devel does not require the base package, but requires -libs instead
 BuildRequires:  ruby >= 1.8.7
@@ -134,10 +140,7 @@ Provides the central puppet server daemon which provides manifests to clients.
 The server can also function as a certificate authority and file server.
 
 %prep
-%setup -q
-%patch01 -p1 -b .paths
-%patch02 -p1 -b .server
-%patch03 -p1
+%autosetup -S git
 # Unbundle
 rm -r lib/puppet/vendor/pathspec
 # Note(hguemar): remove unrelated OS/distro specific folders
@@ -275,9 +278,9 @@ mkdir -p %{buildroot}%{_sysconfdir}/%{name}/modules
 %{_mandir}/man8/puppet-filebucket.8.gz
 %{_mandir}/man8/puppet-generate.8.gz
 %{_mandir}/man8/puppet-help.8.gz
-#%{_mandir}/man8/puppet-instrumentation_data.8.gz
-#%{_mandir}/man8/puppet-instrumentation_listener.8.gz
-#%{_mandir}/man8/puppet-instrumentation_probe.8.gz
+#{_mandir}/man8/puppet-instrumentation_data.8.gz
+#{_mandir}/man8/puppet-instrumentation_listener.8.gz
+#{_mandir}/man8/puppet-instrumentation_probe.8.gz
 %{_mandir}/man8/puppet-epp.8.gz
 %{_mandir}/man8/puppet-key.8.gz
 %{_mandir}/man8/puppet-lookup.8.gz
@@ -288,7 +291,7 @@ mkdir -p %{buildroot}%{_sysconfdir}/%{name}/modules
 %{_mandir}/man8/puppet-plugin.8.gz
 %{_mandir}/man8/puppet-report.8.gz
 %{_mandir}/man8/puppet-resource.8.gz
-#%{_mandir}/man8/puppet-secret_agent.8.gz
+#{_mandir}/man8/puppet-secret_agent.8.gz
 %{_mandir}/man8/puppet-script.8.gz
 %{_mandir}/man8/puppet-status.8.gz
 
@@ -302,9 +305,9 @@ mkdir -p %{buildroot}%{_sysconfdir}/%{name}/modules
 %endif
 %config(noreplace) %{_sysconfdir}/puppet/fileserver.conf
 %dir %{_sysconfdir}/puppet/manifests
-#%{_mandir}/man8/puppet-kick.8.gz
+#{_mandir}/man8/puppet-kick.8.gz
 %{_mandir}/man8/puppet-master.8.gz
-#%{_mandir}/man8/puppet-queue.8.gz
+#{_mandir}/man8/puppet-queue.8.gz
 
 # Fixed uid/gid were assigned in bz 472073 (Fedora), 471918 (RHEL-5),
 # and 471919 (RHEL-4)
@@ -390,6 +393,13 @@ fi
 exit 0
 
 %changelog
+* Tue Jan 22 2019 Bogdan Dobrelya <bdobreli@redhat.com> - 5.5.6-3
+- Use systemd_ordering macro
+
+* Wed Oct 31 2018 Haïkel Guémar <hguemar@fedoraproject.org> - 5.5.6-1
+- Upstream 5.5.6
+- Fix issues with RHEL > 7
+
 * Fri Jul 13 2018 Fedora Release Engineering <releng@fedoraproject.org> - 5.5.1-2
 - Rebuilt for https://fedoraproject.org/wiki/Fedora_29_Mass_Rebuild
 
