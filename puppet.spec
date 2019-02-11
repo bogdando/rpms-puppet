@@ -104,7 +104,7 @@ Provides:       hiera-puppet = %{version}-%{release}
 
 Requires(pre):  shadow-utils
 %if 0%{?_with_systemd}
-%{?systemd_ordering}
+%{?systemd_requires}
 BuildRequires: systemd
 %else
 Requires(post): chkconfig
@@ -126,7 +126,7 @@ Group:          System Environment/Base
 Summary:        Server for the puppet system management tool
 Requires:       puppet = %{version}-%{release}
 %if 0%{?_with_systemd}
-%{?systemd_ordering}
+%{?systemd_requires}
 BuildRequires: systemd
 %else
 Requires(post): chkconfig
