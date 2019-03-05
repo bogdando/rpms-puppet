@@ -26,7 +26,7 @@
 
 Name:           puppet
 Version:        5.5.6
-Release:        5%{?dist}
+Release:        6%{?dist}
 Summary:        A network tool for managing many disparate systems
 License:        ASL 2.0
 URL:            http://puppetlabs.com
@@ -47,6 +47,29 @@ Patch04:        0004-PUP-9069-Add-support-for-RHEL8.patch
 # https://github.com/puppetlabs/puppet/pull/7140 (PUP-9198)
 Patch05:        0005-PUP-9198-Add-RHEL8-support-in-the-dnf-provider.patch
 
+# Puppet is an empty meta-package that inlcudes everything from
+# puppet-systemd-initd and puppet-headless
+Requires:       puppet-systemd-initd
+Requires:       puppet-headless
+
+Obsoletes:      hiera-puppet < 1.0.0-2
+Provides:       hiera-puppet = %{version}-%{release}
+
+%description
+Puppet lets you centrally manage every important aspect of your system using a
+cross-platform specification language that manages all the separate elements
+normally aggregated in different files, like users, cron jobs, and hosts,
+along with obviously discrete elements like packages, services, and files.
+For containers images, it can also be installed as a headless subpackage.
+
+# Nothing to do at the topmost puppet package layer,
+# it's all managed in subpackages
+%prep
+%build
+%install
+%files
+
+%package headless
 BuildRequires:  git
 BuildRequires:  ruby-devel >= 1.8.7
 # ruby-devel does not require the base package, but requires -libs instead
@@ -102,6 +125,14 @@ Provides:       hiera-puppet = %{version}-%{release}
 %{!?_without_augeas:Requires: ruby(augeas)}
 
 Requires(pre):  shadow-utils
+
+Requires: tar
+
+%description headless
+Puppet-headless is a subpackage that may be used when Puppet needs no to
+be running as a service, for example, in a container image.
+
+%package systemd-initd
 %if 0%{?_with_systemd}
 %{?systemd_requires}
 BuildRequires: systemd
@@ -112,13 +143,10 @@ Requires(preun): initscripts
 Requires(postun): initscripts
 %endif
 
-Requires: tar
-
-%description
-Puppet lets you centrally manage every important aspect of your system using a
-cross-platform specification language that manages all the separate elements
-normally aggregated in different files, like users, cron jobs, and hosts,
-along with obviously discrete elements like packages, services, and files.
+%description systemd-initd
+Puppet-systemd-initd is a subpackage that manages initd/systemd entities
+required for Puppet to function as a host service. It normally should not
+be installed in a container image.
 
 %package server
 Summary:        Server for the puppet system management tool
@@ -137,7 +165,7 @@ Requires(postun): initscripts
 Provides the central puppet server daemon which provides manifests to clients.
 The server can also function as a certificate authority and file server.
 
-%prep
+%prep headless
 %autosetup -S git
 # Unbundle
 rm -r lib/puppet/vendor/pathspec
@@ -148,11 +176,7 @@ rm -r ext/{debian,freebsd,gentoo,ips,osx,solaris,suse,windows}
 rm ext/redhat/*.init
 rm ext/{build_defaults.yaml,project_data.yaml}
 
-
-%build
-# Nothing to build
-
-%install
+%install headless
 rm -rf %{buildroot}
 ruby install.rb --destdir=%{buildroot} \
      --configdir=%{_sysconfdir}/puppet \
@@ -170,6 +194,28 @@ install -d -m0755 %{buildroot}%{_localstatedir}/run/puppet
 install -d -m0750 %{buildroot}%{_localstatedir}/log/puppet
 install -d -m0750 %{buildroot}%{_localstatedir}/cache/puppet
 
+
+install -Dp -m0644 %{confdir}/auth.conf %{buildroot}%{_sysconfdir}/puppet/auth.conf
+install -Dp -m0644 %{confdir}/fileserver.conf %{buildroot}%{_sysconfdir}/puppet/fileserver.conf
+install -Dp -m0644 %{confdir}/puppet.conf %{buildroot}%{_sysconfdir}/puppet/puppet.conf
+install -Dp -m0644 ext/redhat/logrotate %{buildroot}%{_sysconfdir}/logrotate.d/puppet
+
+# Note(hguemar): Conflicts with config file from hiera package
+rm %{buildroot}%{_sysconfdir}/puppet/hiera.yaml
+
+# Install the ext/ directory to %%{_datadir}/%%{name}
+install -d %{buildroot}%{_datadir}/%{name}
+cp -a ext/ %{buildroot}%{_datadir}/%{name}
+
+# Install wrappers for SELinux
+install -Dp -m0755 %{SOURCE4} %{buildroot}%{_bindir}/start-puppet-agent
+install -Dp -m0755 %{SOURCE4} %{buildroot}%{_bindir}/start-puppet-master
+install -Dp -m0755 %{SOURCE4} %{buildroot}%{_bindir}/start-puppet-ca
+
+# Create puppet modules directory for puppet module tool
+mkdir -p %{buildroot}%{_sysconfdir}/%{name}/modules
+
+%install systemd-initd
 %if 0%{?_with_systemd}
 %{__install} -d -m0755  %{buildroot}%{_unitdir}
 install -Dp -m0644 ext/systemd/puppet.service %{buildroot}%{_unitdir}/puppet.service
@@ -183,14 +229,6 @@ install -Dp -m0755 %{confdir}/server.init %{buildroot}%{_initrddir}/puppetmaster
 install -Dp -m0755 %{confdir}/queue.init %{buildroot}%{_initrddir}/puppetqueue
 %endif
 
-install -Dp -m0644 %{confdir}/auth.conf %{buildroot}%{_sysconfdir}/puppet/auth.conf
-install -Dp -m0644 %{confdir}/fileserver.conf %{buildroot}%{_sysconfdir}/puppet/fileserver.conf
-install -Dp -m0644 %{confdir}/puppet.conf %{buildroot}%{_sysconfdir}/puppet/puppet.conf
-install -Dp -m0644 ext/redhat/logrotate %{buildroot}%{_sysconfdir}/logrotate.d/puppet
-
-# Note(hguemar): Conflicts with config file from hiera package
-rm %{buildroot}%{_sysconfdir}/puppet/hiera.yaml
-
 # Install a NetworkManager dispatcher script to pickup changes to
 # /etc/resolv.conf and such (https://bugzilla.redhat.com/532085).
 %if 0%{?_with_systemd}
@@ -201,14 +239,6 @@ install -Dpv %{SOURCE2} \
     %{buildroot}%{_sysconfdir}/NetworkManager/dispatcher.d/98-%{name}
 %endif
 
-# Install the ext/ directory to %%{_datadir}/%%{name}
-install -d %{buildroot}%{_datadir}/%{name}
-cp -a ext/ %{buildroot}%{_datadir}/%{name}
-
-# Install wrappers for SELinux
-install -Dp -m0755 %{SOURCE4} %{buildroot}%{_bindir}/start-puppet-agent
-install -Dp -m0755 %{SOURCE4} %{buildroot}%{_bindir}/start-puppet-master
-install -Dp -m0755 %{SOURCE4} %{buildroot}%{_bindir}/start-puppet-ca
 %if 0%{?_with_systemd}
 sed -i 's|^ExecStart=.*/bin/puppet|ExecStart=/usr/bin/start-puppet-master|' \
   %{buildroot}%{_unitdir}/puppetmaster.service
@@ -223,34 +253,12 @@ echo "D /var/run/%{name} 0755 %{name} %{name} -" > \
     %{buildroot}%{_tmpfilesdir}/%{name}.conf
 %endif
 
-# Create puppet modules directory for puppet module tool
-mkdir -p %{buildroot}%{_sysconfdir}/%{name}/modules
-
-
-%files
+%files headless
 %doc README.md examples
 %license LICENSE
 %{_bindir}/puppet
 %{_bindir}/start-puppet-*
 %{puppet_libdir}/*
-%if 0%{?_with_systemd}
-%{_unitdir}/puppet.service
-%{_unitdir}/puppetagent.service
-%else
-%{_initrddir}/puppet
-%config(noreplace) %{_sysconfdir}/sysconfig/puppet
-%endif
-%dir %{_sysconfdir}/puppet
-%dir %{_sysconfdir}/%{name}/modules
-%if 0%{?fedora} >= 15
-%{_tmpfilesdir}/%{name}.conf
-%endif
-%config(noreplace) %{_sysconfdir}/puppet/puppet.conf
-%config(noreplace) %{_sysconfdir}/puppet/auth.conf
-%config(noreplace) %{_sysconfdir}/logrotate.d/puppet
-%dir %{_sysconfdir}/NetworkManager
-%dir %{_sysconfdir}/NetworkManager/dispatcher.d
-%{_sysconfdir}/NetworkManager/dispatcher.d/98-puppet
 %{_datadir}/%{name}
 # These need to be owned by puppet so the server can
 # write to them
@@ -293,6 +301,26 @@ mkdir -p %{buildroot}%{_sysconfdir}/%{name}/modules
 %{_mandir}/man8/puppet-script.8.gz
 %{_mandir}/man8/puppet-status.8.gz
 
+%files systemd-initd
+%if 0%{?_with_systemd}
+%{_unitdir}/puppet.service
+%{_unitdir}/puppetagent.service
+%else
+%{_initrddir}/puppet
+%config(noreplace) %{_sysconfdir}/sysconfig/puppet
+%endif
+%if 0%{?fedora} >= 15
+%{_tmpfilesdir}/%{name}.conf
+%endif
+%dir %{_sysconfdir}/puppet
+%dir %{_sysconfdir}/%{name}/modules
+%config(noreplace) %{_sysconfdir}/puppet/puppet.conf
+%config(noreplace) %{_sysconfdir}/puppet/auth.conf
+%config(noreplace) %{_sysconfdir}/logrotate.d/puppet
+%dir %{_sysconfdir}/NetworkManager
+%dir %{_sysconfdir}/NetworkManager/dispatcher.d
+%{_sysconfdir}/NetworkManager/dispatcher.d/98-puppet
+
 %files server
 %if 0%{?_with_systemd}
 %{_unitdir}/puppetmaster.service
@@ -309,7 +337,7 @@ mkdir -p %{buildroot}%{_sysconfdir}/%{name}/modules
 
 # Fixed uid/gid were assigned in bz 472073 (Fedora), 471918 (RHEL-5),
 # and 471919 (RHEL-4)
-%pre
+%pre headless
 getent group puppet &>/dev/null || groupadd -r puppet -g 52 &>/dev/null
 getent passwd puppet &>/dev/null || \
 useradd -r -u 52 -g puppet -d %{_localstatedir}/lib/puppet -s /sbin/nologin \
@@ -320,7 +348,7 @@ if [ $1 -gt 1 ]; then
 fi
 exit 0
 
-%post
+%post systemd-initd
 %if 0%{?_with_systemd}
 %systemd_post puppet.service
 %else
@@ -348,7 +376,7 @@ exit 0
 %endif
 exit 0
 
-%preun
+%preun systemd-initd
 %if 0%{?_with_systemd}
 %systemd_preun puppet.service
 %else
@@ -370,7 +398,7 @@ fi
 %endif
 exit 0
 
-%postun
+%postun systemd-initd
 %if 0%{?_with_systemd}
 %systemd_postun_with_restart puppet.service
 %else
@@ -391,6 +419,9 @@ fi
 exit 0
 
 %changelog
+* Tue Mar 5 2019 Bogdan Dobrelya <bdobreli@redhat.com> - 5.5.6-6
+- Add subpackages for systemd/initd management and headless puppet setup
+
 * Sun Feb 17 2019 Bogdan Dobrelya <bdobreli@redhat.com> - 5.5.6-5
 - Revert use of systemd_ordering macro
 
