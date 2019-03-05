@@ -26,7 +26,7 @@
 
 Name:           puppet
 Version:        5.5.6
-Release:        5%{?dist}
+Release:        6%{?dist}
 Summary:        A network tool for managing many disparate systems
 License:        ASL 2.0
 URL:            http://puppetlabs.com
@@ -47,12 +47,32 @@ Patch04:        0004-PUP-9069-Add-support-for-RHEL8.patch
 # https://github.com/puppetlabs/puppet/pull/7140 (PUP-9198)
 Patch05:        0005-PUP-9198-Add-RHEL8-support-in-the-dnf-provider.patch
 
+# Puppet is an empty meta-package that inlcudes everything from
+# puppet-service and puppet-headless
+Requires:       puppet-service = %{version}-%{release}
+Requires:       puppet-headless = %{version}-%{release}
+
+Obsoletes:      hiera-puppet < 1.0.0-2
+Provides:       hiera-puppet = %{version}-%{release}
+
+BuildArch:      noarch
+
+%description
+Puppet lets you centrally manage every important aspect of your system using a
+cross-platform specification language that manages all the separate elements
+normally aggregated in different files, like users, cron jobs, and hosts,
+along with obviously discrete elements like packages, services, and files.
+For containers images, it can also be installed as a headless subpackage.
+
+%files
+
+%package headless
+Summary:        Headless Puppet for containers images builds
 BuildRequires:  git
 BuildRequires:  ruby-devel >= 1.8.7
 # ruby-devel does not require the base package, but requires -libs instead
 BuildRequires:  ruby >= 1.8.7
 
-BuildArch:      noarch
 %if 0%{?rhel} && 0%{?rhel} <= 6
 Requires:       ruby(abi) = 1.8
 %else
@@ -102,6 +122,15 @@ Provides:       hiera-puppet = %{version}-%{release}
 %{!?_without_augeas:Requires: ruby(augeas)}
 
 Requires(pre):  shadow-utils
+
+Requires: tar
+
+%description headless
+Puppet-headless is a subpackage that may be used when Puppet needs no to
+be running as a service, for example, in a container image.
+
+%package service
+Summary:        Services configuration bits for Puppet
 %if 0%{?_with_systemd}
 %{?systemd_requires}
 BuildRequires: systemd
@@ -112,13 +141,10 @@ Requires(preun): initscripts
 Requires(postun): initscripts
 %endif
 
-Requires: tar
-
-%description
-Puppet lets you centrally manage every important aspect of your system using a
-cross-platform specification language that manages all the separate elements
-normally aggregated in different files, like users, cron jobs, and hosts,
-along with obviously discrete elements like packages, services, and files.
+%description service
+Puppet-service is a subpackage that manages initd/systemd entities
+required for Puppet to function as a host service. It normally should not
+be installed in a container image.
 
 %package server
 Summary:        Server for the puppet system management tool
@@ -227,30 +253,12 @@ echo "D /var/run/%{name} 0755 %{name} %{name} -" > \
 mkdir -p %{buildroot}%{_sysconfdir}/%{name}/modules
 
 
-%files
+%files headless
 %doc README.md examples
 %license LICENSE
 %{_bindir}/puppet
 %{_bindir}/start-puppet-*
 %{puppet_libdir}/*
-%if 0%{?_with_systemd}
-%{_unitdir}/puppet.service
-%{_unitdir}/puppetagent.service
-%else
-%{_initrddir}/puppet
-%config(noreplace) %{_sysconfdir}/sysconfig/puppet
-%endif
-%dir %{_sysconfdir}/puppet
-%dir %{_sysconfdir}/%{name}/modules
-%if 0%{?fedora} >= 15
-%{_tmpfilesdir}/%{name}.conf
-%endif
-%config(noreplace) %{_sysconfdir}/puppet/puppet.conf
-%config(noreplace) %{_sysconfdir}/puppet/auth.conf
-%config(noreplace) %{_sysconfdir}/logrotate.d/puppet
-%dir %{_sysconfdir}/NetworkManager
-%dir %{_sysconfdir}/NetworkManager/dispatcher.d
-%{_sysconfdir}/NetworkManager/dispatcher.d/98-puppet
 %{_datadir}/%{name}
 # These need to be owned by puppet so the server can
 # write to them
@@ -293,6 +301,26 @@ mkdir -p %{buildroot}%{_sysconfdir}/%{name}/modules
 %{_mandir}/man8/puppet-script.8.gz
 %{_mandir}/man8/puppet-status.8.gz
 
+%files service
+%if 0%{?_with_systemd}
+%{_unitdir}/puppet.service
+%{_unitdir}/puppetagent.service
+%else
+%{_initrddir}/puppet
+%config(noreplace) %{_sysconfdir}/sysconfig/puppet
+%endif
+%if 0%{?fedora} >= 15
+%{_tmpfilesdir}/%{name}.conf
+%endif
+%dir %{_sysconfdir}/puppet
+%dir %{_sysconfdir}/%{name}/modules
+%config(noreplace) %{_sysconfdir}/puppet/puppet.conf
+%config(noreplace) %{_sysconfdir}/puppet/auth.conf
+%config(noreplace) %{_sysconfdir}/logrotate.d/puppet
+%dir %{_sysconfdir}/NetworkManager
+%dir %{_sysconfdir}/NetworkManager/dispatcher.d
+%{_sysconfdir}/NetworkManager/dispatcher.d/98-puppet
+
 %files server
 %if 0%{?_with_systemd}
 %{_unitdir}/puppetmaster.service
@@ -309,7 +337,7 @@ mkdir -p %{buildroot}%{_sysconfdir}/%{name}/modules
 
 # Fixed uid/gid were assigned in bz 472073 (Fedora), 471918 (RHEL-5),
 # and 471919 (RHEL-4)
-%pre
+%pre headless
 getent group puppet &>/dev/null || groupadd -r puppet -g 52 &>/dev/null
 getent passwd puppet &>/dev/null || \
 useradd -r -u 52 -g puppet -d %{_localstatedir}/lib/puppet -s /sbin/nologin \
@@ -320,7 +348,7 @@ if [ $1 -gt 1 ]; then
 fi
 exit 0
 
-%post
+%post service
 %if 0%{?_with_systemd}
 %systemd_post puppet.service
 %else
@@ -348,7 +376,7 @@ exit 0
 %endif
 exit 0
 
-%preun
+%preun service
 %if 0%{?_with_systemd}
 %systemd_preun puppet.service
 %else
@@ -370,7 +398,7 @@ fi
 %endif
 exit 0
 
-%postun
+%postun service
 %if 0%{?_with_systemd}
 %systemd_postun_with_restart puppet.service
 %else
@@ -391,6 +419,9 @@ fi
 exit 0
 
 %changelog
+* Tue Mar 5 2019 Bogdan Dobrelya <bdobreli@redhat.com> - 5.5.6-6
+- Add subpackages for services management and headless puppet setup
+
 * Sun Feb 17 2019 Bogdan Dobrelya <bdobreli@redhat.com> - 5.5.6-5
 - Revert use of systemd_ordering macro
 
